@@ -105,9 +105,11 @@ agent-gate-savestate-6182f0a2d792.bin
 
 ## Local Smoke Run
 
-With the runtime artifacts present:
+After clone:
 
 ```bash
+pnpm install && pnpm sync:vendor   # browser vendor JS/WASM/CSS
+scripts/fetch-artifacts.sh         # ISO, savestate, BIOS
 python3 -m http.server 8080
 ```
 
@@ -209,10 +211,17 @@ machine.
 
 ## Artifact Fetching
 
-Large runtime artifacts are fetched after clone and stored as local files in the
-repository root. The browser runtime reads local artifact paths from
-`manifest.json`; it does not need remote ISO or savestate URLs during normal
-local operation.
+Large runtime artifacts are published as GitHub Release assets, not committed
+to git history. `scripts/fetch-artifacts.sh` downloads them after clone:
 
-The public artifact download workflow is defined separately from this source
-repository so large binaries stay out of git history.
+- ISO and savestate come from the `runtime-<iso_version>` release of this repo.
+- BIOS files (`bios/seabios.bin`, `bios/vgabios.bin`) come from the
+  [copy/v86](https://github.com/copy/v86) commit pinned in `manifest.json`
+  (`bios.v86_ref`).
+- Every download is verified against the `*_sha256` fields in `manifest.json`;
+  files that already match are skipped.
+- Uses `gh release download` when the GitHub CLI is authenticated, otherwise
+  falls back to anonymous HTTPS.
+
+The browser runtime reads local artifact paths from `manifest.json`; it does
+not fetch ISO or savestate URLs at runtime.
