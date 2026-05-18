@@ -1,0 +1,16 @@
+{
+  "schema_version": "agent.gate.expected_verdicts.v0",
+  "incident_id": "credential-boundary-escape",
+  "verdicts": [
+    {
+      "order": 1,
+      "verdict": "FAIL",
+      "policy": "sl.ai.policy.credential-access"
+    },
+    {
+      "order": 2,
+      "verdict": "PASS",
+      "policy": "none"
+    }
+  ]
+}

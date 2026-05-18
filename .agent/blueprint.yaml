@@ -1,0 +1,34 @@
+# Per-repo agent stack config for Agent Gate Incident Replay.
+blueprint_version: "0.1"
+
+project_type: browser-runtime
+
+capabilities:
+  - urn:hmx:cap:Planning
+  - urn:hmx:cap:SoftwareEngineering
+  - urn:hmx:cap:CodeReview
+  - urn:hmx:cap:Verification
+
+roles:
+  planner:
+    tool: codex
+    capabilities: [urn:hmx:cap:Planning]
+    skills: [brainstorming, writing-plans]
+    constraints: []
+  implementor:
+    tool: codex
+    capabilities: [urn:hmx:cap:SoftwareEngineering]
+    skills: [test-driven-development, verification-before-completion]
+    constraints: []
+  reviewer:
+    tool: independent
+    capabilities: [urn:hmx:cap:CodeReview]
+    skills: [requesting-code-review]
+    constraints:
+      - not_same_tool_as: implementor
+  verifier:
+    tool: independent
+    capabilities: [urn:hmx:cap:Verification]
+    skills: [verification-before-completion]
+    constraints:
+      - not_same_tool_as: implementor

@@ -1,0 +1,29 @@
+.DS_Store
+
+# Temporary private source checkouts used only during bootstrap/extraction.
+workforce/
+_source/
+
+# Dependency directories.
+node_modules/
+
+# Large VM/runtime artifacts are published as release artifacts, not committed.
+*.iso
+*.bin
+*.img
+*.qcow2
+*.raw
+*.squashfs
+
+# Browser runtime vendor artifacts copied from package builds.
+libv86.js
+v86.wasm
+xterm.js
+xterm.css
+xterm-addon-fit.js
+bios/
+
+# Local caches.
+.cache/
+dist/
+tmp/

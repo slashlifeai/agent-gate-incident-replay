@@ -1,0 +1,8 @@
+{
+  "iso":              "ai-workforce-os-v86-demo-x86_64-linux.iso",
+  "iso_sha256":       "6182f0a2d792bb7bc13dda4155d7062f69ee3e565fdbc5fc309d592b3807ac9d",
+  "iso_version":      "6182f0a2d792",
+  "iso_size_mb":      327.0,
+  "savestate":        "agent-gate-savestate-6182f0a2d792.bin",
+  "built_at":         "2026-05-12T09:25:44Z"
+}

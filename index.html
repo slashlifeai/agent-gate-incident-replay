@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agent Gate — AI Workforce OS</title>
+  <link rel="stylesheet" href="xterm.css">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      height: 100%;
+      background: #0a0a0a;
+      color: #d4d4d4;
+      font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+      overflow: hidden;
+    }
+
+    #header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 20px;
+      border-bottom: 1px solid #1e1e1e;
+      background: #0d0d0d;
+      flex-shrink: 0;
+    }
+
+    #header .product {
+      font-size: 13px;
+      color: #888;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    #header .product span { color: #ccc; }
+
+    #header-right {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 11px;
+      letter-spacing: 0.05em;
+    }
+
+    #iso-version { color: #444; }
+
+    #status        { color: #555; }
+    #status.booting{ color: #7a7a00; }
+    #status.ready  { color: #2e7d32; }
+    #status.error  { color: #7a1c1c; }
+
+    #llm-bridge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: #555;
+    }
+    #llm-bridge::before {
+      content: "";
+      display: inline-block;
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: #444;
+    }
+    #llm-bridge.ready::before { background: #2e7d32; }
+    #llm-bridge.busy::before  { background: #e5e510; animation: pulse 1s infinite; }
+    #llm-bridge.error::before { background: #7a1c1c; }
+    #llm-bridge.ready   { color: #888; }
+    #llm-bridge.busy    { color: #b0b000; }
+    #llm-bridge.error   { color: #cc7777; }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50%      { opacity: 0.3; }
+    }
+
+    button.hbtn {
+      background: #1e1e1e;
+      color: #d4d4d4;
+      border: 1px solid #444;
+      font-family: inherit;
+      font-size: 11px;
+      padding: 4px 10px;
+      cursor: pointer;
+      letter-spacing: 0.05em;
+    }
+    button.hbtn:hover    { background: #2a2a2a; border-color: #777; }
+    button.hbtn:disabled { opacity: 0.4; cursor: default; }
+    button.hbtn.hidden   { display: none; }
+
+    #terminal-wrap {
+      display: flex;
+      flex-direction: column;
+      height: calc(100vh - 41px);
+      padding: 8px;
+    }
+    #terminal { flex: 1; min-height: 0; }
+
+    .xterm,
+    .xterm-viewport,
+    .xterm-screen { background: #0a0a0a !important; }
+
+    /* gesture overlay — only shown when Gemini Nano needs first-time
+       download (Chrome requires a user gesture for that) */
+    #gesture-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.78);
+      backdrop-filter: blur(2px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      cursor: pointer;
+      animation: fadeIn 0.25s ease-out;
+    }
+    #gesture-overlay.hidden { display: none; }
+    #gesture-overlay-card {
+      max-width: 520px;
+      padding: 28px 36px;
+      background: #0d0d0d;
+      border: 1px solid #2a2a2a;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+      text-align: center;
+    }
+    #gesture-overlay h2 {
+      font-size: 14px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: #ccc;
+      margin-bottom: 14px;
+    }
+    #gesture-overlay p {
+      font-size: 13px;
+      line-height: 1.6;
+      color: #aaa;
+      margin-bottom: 8px;
+    }
+    #gesture-overlay .accent {
+      color: #2e7d32;
+      font-weight: bold;
+    }
+    #gesture-overlay .small {
+      font-size: 11px;
+      color: #777;
+      margin-top: 16px;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to   { opacity: 1; }
+    }
+  </style>
+</head>
+<body>
+  <div id="gesture-overlay" class="hidden">
+    <div id="gesture-overlay-card">
+      <h2>Enable in-browser LLM agent</h2>
+      <p>Chrome's built-in <span class="accent">Gemini Nano</span> model needs to download (~1.5 GB) before <code>agent-gate-llm-agent</code> can run.</p>
+      <p>Chrome requires a user gesture to begin — <strong>click anywhere</strong> to start.</p>
+      <p class="small">After download the model is cached; future page-loads enable instantly.<br>
+      Skip if you only want the deterministic <code>agent-gate-demo</code> replay.</p>
+    </div>
+  </div>
+
+  <div id="header">
+    <div class="product">AI Workforce OS &nbsp;/&nbsp; <span>Agent Gate v0</span></div>
+    <div id="header-right">
+      <span id="llm-bridge" title="In-browser LLM bridge for Linux-side agents (serial RPC)">llm-bridge: detecting…</span>
+      <span id="iso-version" title="ISO content hash (sha256 prefix)"></span>
+      <span id="status" class="booting">loading…</span>
+      <button id="savestate-btn" class="hbtn hidden" title="Download a v86 savestate so the next page-load is instant">save state</button>
+    </div>
+  </div>
+  <div id="terminal-wrap">
+    <div id="terminal"></div>
+  </div>
+
+  <script src="xterm.js"></script>
+  <script src="xterm-addon-fit.js"></script>
+  <script src="libv86.js"></script>
+  <!-- Cache-bust demo.js so script changes propagate without depending on
+       hard-refresh.  Without this, edits to applyHotfixes() etc. silently
+       get masked by an aggressively-cached demo.js. -->
+  <script>document.write('<script src="demo.js?t=' + Date.now() + '"><\/script>');</script>
+</body>
+</html>
