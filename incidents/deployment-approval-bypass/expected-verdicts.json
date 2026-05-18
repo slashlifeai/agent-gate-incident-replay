@@ -1,0 +1,20 @@
+{
+  "schema_version": "agent.gate.expected_verdicts.v0",
+  "incident_id": "deployment-approval-bypass",
+  "verdicts": [
+    {
+      "order": 1,
+      "verdict": "FAIL",
+      "policy": "sl.ai.policy.deployment-approval",
+      "reason_code": "approval_chain_invalid",
+      "evidence": "fixtures/events.fail.jsonl"
+    },
+    {
+      "order": 2,
+      "verdict": "PASS",
+      "policy": "sl.ai.policy.deployment-approval",
+      "reason_code": "approval_chain_valid",
+      "evidence": "fixtures/events.pass.jsonl"
+    }
+  ]
+}

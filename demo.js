@@ -108,6 +108,32 @@
       .catch(() => false);
   }
 
+  // Public catalog of incident modules.  Two transports are wired:
+  //
+  //   - base64-over-serial inject (default)        works everywhere
+  //   - virtio-9p mount at /mnt/incident (opt-in)  cleaner, but
+  //                                                requires kernel
+  //                                                9p_virtio support
+  //                                                and a recaptured
+  //                                                savestate
+  //
+  // The 9p path is gated behind ?fs9p=1 because (a) adding the
+  // filesystem device invalidates the original savestate and forces
+  // a cold boot, and (b) on the AI Workforce OS images we've tried,
+  // sudoers refuses the unprivileged mount.  Until we ship an ISO
+  // with 9p auto-mounted at boot, base64 is the reliable surface.
+  const FS9P_MANIFEST = "fs9p.json";
+  const FS9P_BASEURL  = "fs9p/";
+
+  async function fs9pAvailable() {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("fs9p") !== "1") return false;
+    try {
+      const r = await fetch(FS9P_MANIFEST, { method: "HEAD", cache: "no-store" });
+      return r.ok;
+    } catch (_) { return false; }
+  }
+
   function startEmulator(opts) {
     const base = {
       wasm_path:       "v86.wasm",
@@ -118,8 +144,14 @@
       autostart:       true,
       disable_mouse:   true,
     };
+    if (window.__fs9pEnabled) {
+      base.filesystem = { baseurl: FS9P_BASEURL, basefs: FS9P_MANIFEST };
+    }
 
     let promptSeen = false;
+    const restoreStart = Date.now();
+    const triedSavestate = !!opts.initial_state;
+    let restoreFallbackFired = false;
     const emulator = new V86(Object.assign({}, base, opts));
 
     emulator.add_listener("download-progress", function (ev) {
@@ -161,11 +193,71 @@
     // ─ (U+2500, three bytes in UTF-8) get rendered correctly.  Doing per-byte
     // String.fromCharCode treats each byte as a Latin-1 char and corrupts the
     // box-drawing / em-dash output of agent-gate-demo.
+    //
+    // Inline timeline-marker filter: incident replays emit
+    //   <AG-TL>{...JSON...}</AG-TL>\n
+    // spans on the serial stream.  They are routed to the timeline panel
+    // (window.__agentGateTimelineEmit) and never rendered in xterm.  The
+    // filter is a tiny state machine — fast path passes through one byte
+    // at a time; slow path only engages once we've seen a literal '<'.
     let serialBuf = "";
+    const TL_HEAD = "<AG-TL>";
+    const TL_TAIL = "</AG-TL>";
+    let tlSaw = "";          // accumulating prefix of a possible "<AG-TL>"
+    let tlInMarker = false;
+    let tlMarkerBody = "";
+    let tlSuppressNL = false;
+    const termEncoder = new TextEncoder();
+
+    function termWriteStr(s) {
+      if (s.length) term.write(termEncoder.encode(s));
+    }
+
     emulator.add_listener("serial0-output-byte", function (byte) {
-      term.write(Uint8Array.of(byte));
-      serialBuf += String.fromCharCode(byte);   // approximate; for diagnostics only
+      const ch = String.fromCharCode(byte);
+      serialBuf += ch;
       if (serialBuf.length > 200000) serialBuf = serialBuf.slice(-200000);
+
+      if (tlInMarker) {
+        tlMarkerBody += ch;
+        if (tlMarkerBody.endsWith(TL_TAIL)) {
+          const body = tlMarkerBody.slice(0, -TL_TAIL.length);
+          try {
+            if (typeof window.__agentGateTimelineEmit === "function") {
+              window.__agentGateTimelineEmit(body);
+            }
+          } catch (e) { console.warn("[timeline] emit failed:", e); }
+          tlInMarker = false;
+          tlMarkerBody = "";
+          tlSuppressNL = true;       // swallow the \n that follows </AG-TL>
+        }
+        return;
+      }
+      if (tlSuppressNL) {
+        tlSuppressNL = false;
+        if (ch === "\n") return;     // dropped — keeps the terminal clean
+      }
+      if (tlSaw.length > 0) {
+        const candidate = tlSaw + ch;
+        if (TL_HEAD.startsWith(candidate)) {
+          if (candidate === TL_HEAD) {
+            tlInMarker = true;
+            tlSaw = "";
+          } else {
+            tlSaw = candidate;
+          }
+          return;
+        }
+        // Not a marker after all — flush what we accumulated.
+        termWriteStr(tlSaw);
+        tlSaw = "";
+        // fall through to handle this byte normally (may start a new '<')
+      }
+      if (ch === "<") {
+        tlSaw = "<";
+        return;
+      }
+      term.write(Uint8Array.of(byte));
     });
     window.serialDump = function () {
       console.log("=== serial buffer (" + serialBuf.length + " bytes) ===");
@@ -245,30 +337,224 @@
 
     // ── URL-driven auto-run ───────────────────────────────────────────
     // Deep-link support:
-    //   ?case=<name>     → "agent-gate-demo <name>"
+    //   ?case=<name>     → if incidents/<name>/incident.json exists, mount
+    //                      that module into /tmp/incident and run its
+    //                      replay.sh inside the VM.  Otherwise fall back
+    //                      to "agent-gate-demo <name>" (ISO-baked case).
     //   ?run=<command>   → run <command> verbatim
     //   ?goal=<text>     → "agent-gate-llm-agent <text>" (LLM path)
     // Fires once, ~1.5 s after the shell prompt is visible, so the
     // demo flows end-to-end from a single shareable URL.
-    function maybeAutoRun() {
+    function sendLine(line) {
+      // Single newline per call.  v86's UART is event-driven so back-to-back
+      // sends arrive correctly, but the kernel's tty line discipline
+      // can occasionally lose a byte when we hammer it inside a tight
+      // loop — a 4 ms gap between lines is enough breathing room and
+      // still injects 10 KB of base64 in ~250 ms.
+      emulator.serial0_send(line + "\n");
+    }
+    function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+    async function sendLines(lines) {
+      for (const line of lines) {
+        sendLine(line);
+        await sleep(4);
+      }
+    }
+
+    // Inject a single file as a base64 heredoc.  The sentinel includes a
+    // random suffix so an incident fixture that happens to contain the
+    // literal text "__AG_EOF__" can't terminate the heredoc early.
+    async function injectFile(path, contents) {
+      const sentinel = "__AG_EOF_" + Math.random().toString(36).slice(2, 8).toUpperCase() + "__";
+      const b64 = btoa(unescape(encodeURIComponent(contents)));
+      // Wrap base64 at 76 cols — friendly for the kernel line buffer and
+      // matches RFC 2045 / coreutils base64 default.
+      const chunks = [];
+      for (let i = 0; i < b64.length; i += 76) chunks.push(b64.slice(i, i + 76));
+      const lines = [];
+      lines.push(`base64 -d > '${path}' <<'${sentinel}'`);
+      lines.push(...chunks);
+      lines.push(sentinel);
+      await sendLines(lines);
+    }
+
+    async function fetchText(url) {
+      const r = await fetch(url, { cache: "no-store" });
+      if (!r.ok) throw new Error("fetch " + url + " → " + r.status);
+      return r.text();
+    }
+
+    // Try a 9p mount + run.  Resolves true iff the in-guest sentinel
+    // says the mount took and the entrypoint exists.  Anything else
+    // (no kernel module, sudoers denies the mount, missing replay.sh)
+    // resolves false so the caller can fall back to base64 inject.
+    async function tryMountViaFs9p(name) {
+      const root = "/mnt/incident";
+      const tag = "AG9P" + Math.random().toString(36).slice(2, 8).toUpperCase();
+      const ok = tag + "OK";
+      const fail = tag + "FAIL";
+      setStatus("mounting host9p…", "booting");
+      // sudo -n  — fail immediately if a password is required, so the
+      //            terminal can't be left at an interactive prompt
+      //            waiting for input (which would interpret the next
+      //            inject as the password and lock everything up).
+      // </dev/null — extra belt: even if -n is ignored, sudo can't
+      //              read from the tty.
+      const SUDO = "sudo -n";
+      const line =
+        `( ${SUDO} mkdir -p ${root} </dev/null 2>/dev/null` +
+        ` && ( mountpoint -q ${root}` +
+        `      || ${SUDO} mount -t 9p -o trans=virtio,version=9p2000.L,access=any,msize=8192 host9p ${root} </dev/null` +
+        `    ) 2>/dev/null` +
+        ` && test -x ${root}/${name}/replay.sh` +
+        ` && printf '%s\\n' '${ok}'` +
+        ` && ${root}/${name}/replay.sh` +
+        ` ) || printf '%s\\n' '${fail}'`;
+      const before = (window.__serialBuf || "").length;
+      // \x15 = Ctrl-U (kill line) — clear any stray input the user may
+      // have typed during the boot/restore window before our autorun
+      // fires.  Otherwise bash sees e.g. "2( sudo ..." and reports a
+      // syntax error near `(`.
+      emulator.serial0_send("\x15" + line + "\r");
+
+      // Sentinel match must be preceded by a line break — otherwise
+      // we'd also match the literal 'AG9P…OK' / 'AG9P…FAIL' strings
+      // baked into the echoed command itself.  The actual printf
+      // output is always on its own line, so a leading \n (or \r) is
+      // the disambiguator.
+      const okLine   = "\n" + ok;
+      const failLine = "\n" + fail;
+      const deadline = Date.now() + 4000;
+      while (Date.now() < deadline) {
+        const tail = (window.__serialBuf || "").slice(before);
+        if (tail.includes(okLine))   { console.info("[mount] 9p mount succeeded"); return true; }
+        if (tail.includes(failLine)) { console.info("[mount] 9p mount failed");    return false; }
+        await sleep(80);
+      }
+      console.warn("[mount] 9p mount sentinel timed out — assuming failure");
+      return false;
+    }
+
+    // Legacy mount: stream the module's files in over the serial console
+    // as base64 heredocs into /tmp/incident, then run replay.sh.  Used
+    // when fs9p is unavailable, the kernel lacks 9p_virtio, or sudoers
+    // refuses the mount.  Slower and visually noisier than the 9p path,
+    // but works on any kernel.
+    async function mountViaBase64Inject(name) {
+      const base = "incidents/" + encodeURIComponent(name);
+      let incidentJsonText;
+      try {
+        incidentJsonText = await fetchText(base + "/incident.json");
+      } catch (e) {
+        console.info("[mount] no module at", base, "→", e.message);
+        return false;
+      }
+      let manifest;
+      try { manifest = JSON.parse(incidentJsonText); }
+      catch (e) {
+        console.warn("[mount] incident.json parse failed:", e);
+        return false;
+      }
+
+      const entrypoint = manifest.entrypoint || "replay.sh";
+      const filesText = {};
+      filesText["incident.json"] = incidentJsonText;
+      filesText[entrypoint] = await fetchText(base + "/" + entrypoint);
+      try { filesText["expected-verdicts.json"] = await fetchText(base + "/expected-verdicts.json"); }
+      catch (_) {}
+      try { filesText["README.md"] = await fetchText(base + "/README.md"); }
+      catch (_) {}
+      const evidence = Array.isArray(manifest.evidence_artifacts) ? manifest.evidence_artifacts : [];
+      for (const rel of evidence) {
+        if (rel.startsWith("/") || rel.includes("..")) continue;
+        filesText[rel] = await fetchText(base + "/" + rel);
+      }
+
+      const total = Object.keys(filesText).length;
+      setStatus("inject (fallback): " + name + " (" + total + " files)…", "booting");
+      console.info("[mount] base64 inject " + name + " — " + total + " files");
+
+      const root = "/tmp/incident";
+      const dirs = new Set([root]);
+      for (const rel of Object.keys(filesText)) {
+        const parts = rel.split("/");
+        if (parts.length > 1) { parts.pop(); dirs.add(root + "/" + parts.join("/")); }
+      }
+      await sendLines([
+        // \x15 = Ctrl-U; kills any stray input so the very first
+        // command in the inject sequence isn't prefixed by a leftover
+        // keystroke (e.g. bash seeing "2stty -echo" instead of
+        // "stty -echo").
+        "\x15stty -echo 2>/dev/null; clear",
+        "rm -rf " + root + " 2>/dev/null; mkdir -p " + Array.from(dirs).map(d => "'" + d + "'").join(" "),
+      ]);
+
+      let i = 0;
+      for (const [rel, contents] of Object.entries(filesText)) {
+        i++;
+        setStatus("inject " + name + " (" + i + "/" + total + " — " + rel + ")", "booting");
+        await injectFile(root + "/" + rel, contents);
+      }
+
+      await sendLines([
+        "chmod +x '" + root + "/" + entrypoint + "'",
+        "stty echo 2>/dev/null; clear",
+        "'" + root + "/" + entrypoint + "'",
+      ]);
+      setStatus("running incident " + name, "ready");
+      return true;
+    }
+
+    // Mount dispatcher.  Prefers the 9p path when available; falls back
+    // to base64 inject so the demo never bricks on kernels / sudoers
+    // policies that block virtio-9p.
+    async function mountIncidentModule(name) {
+      try {
+        const r = await fetch("incidents/" + encodeURIComponent(name) + "/incident.json", { method: "HEAD" });
+        if (!r.ok) return false;
+      } catch (_) { return false; }
+
+      if (window.__fs9pEnabled) {
+        const ok = await tryMountViaFs9p(name);
+        if (ok) return true;
+        console.info("[mount] 9p path failed — falling back to base64 inject");
+      }
+      return mountViaBase64Inject(name);
+    }
+
+    async function maybeAutoRun() {
       if (window.__autoRunFired) return;
       const params = new URLSearchParams(window.location.search);
-      let cmd = null;
-      if (params.has("run"))       cmd = params.get("run");
-      else if (params.has("case")) cmd = "agent-gate-demo " + params.get("case");
-      else if (params.has("goal")) cmd = 'agent-gate-llm-agent "' + params.get("goal") + '"';
-      if (!cmd) return;
       window.__autoRunFired = true;
-      console.info("[autorun] queued:", cmd);
-      setTimeout(() => {
-        try {
-          emulator.serial0_send(cmd + "\r");
-          console.info("[autorun] sent");
-        } catch (e) {
-          console.warn("[autorun] failed:", e);
-          window.__autoRunFired = false;   // allow retry from console
+      // Prefix every autorun command with \x15 (Ctrl-U) so any stray
+      // keystroke the user landed in the input buffer during the
+      // boot/restore window is killed before our command goes in.
+      const KILL = "\x15";
+      try {
+        if (params.has("run")) {
+          const cmd = params.get("run");
+          console.info("[autorun] run:", cmd);
+          await sleep(1500);
+          emulator.serial0_send(KILL + cmd + "\r");
+        } else if (params.has("case")) {
+          const name = params.get("case");
+          await sleep(1500);
+          const mounted = await mountIncidentModule(name);
+          if (!mounted) {
+            console.info("[autorun] falling back to ISO-baked agent-gate-demo", name);
+            emulator.serial0_send(KILL + "agent-gate-demo " + name + "\r");
+          }
+        } else if (params.has("goal")) {
+          const goal = params.get("goal");
+          console.info("[autorun] goal:", goal);
+          await sleep(1500);
+          emulator.serial0_send(KILL + 'agent-gate-llm-agent "' + goal + '"\r');
         }
-      }, 1500);
+      } catch (e) {
+        console.warn("[autorun] failed:", e);
+        window.__autoRunFired = false;
+      }
     }
 
     saveBtn.addEventListener("click", async function () {
@@ -344,6 +630,24 @@
     });
 
     emulator.add_listener("emulator-stopped", function () {
+      // If v86 stops within the first few seconds AND we asked it to
+      // restore a savestate, treat that as a state-incompatibility
+      // crash (the most common cause is that the saved state lacks
+      // the virtio-9p device slot that the new filesystem config
+      // introduces).  Retry cold-boot so the user isn't stranded.
+      if (triedSavestate && !promptSeen && !restoreFallbackFired
+          && Date.now() - restoreStart < 8000) {
+        restoreFallbackFired = true;
+        console.warn("[savestate] restore stopped before prompt — likely 9p "
+          + "device mismatch.  Falling back to cold boot.  After this boot "
+          + "completes, click 'save state' to capture a 9p-compatible state.");
+        setStatus("savestate incompatible with 9p — cold-booting (capture a new state after boot)", "booting");
+        try { emulator.destroy && emulator.destroy(); } catch (_) {}
+        const coldOpts = Object.assign({}, opts);
+        delete coldOpts.initial_state;
+        window.emulator = startEmulator(coldOpts);
+        return;
+      }
       setStatus("stopped", "error");
     });
 
@@ -370,8 +674,39 @@
     return { cdrom: { url: IMAGE_URL } };
   }
 
-  loadManifest().then(function () {
+  // Belt-and-suspenders: if v86 rejects its restore_state Promise (the
+  // common cause is "Cannot read properties of null (reading '0')" when
+  // a pre-9p savestate is restored against a v86 instance that now has
+  // a virtio_9p device), reload without the savestate.  We only act on
+  // boot-time rejections so genuine app errors after boot still surface.
+  window.addEventListener("unhandledrejection", function (ev) {
+    const txt = String(ev && ev.reason && (ev.reason.stack || ev.reason.message || ev.reason));
+    if (!/set_state|restore_state/i.test(txt)) return;
+    if (window.__savestateCrashFiredAt) return;
+    window.__savestateCrashFiredAt = Date.now();
+    ev.preventDefault && ev.preventDefault();
+    console.warn("[savestate] restore rejected — likely 9p slot mismatch. Cold-booting.");
+    setStatus("savestate incompatible with 9p — cold-booting (click 'save state' after boot)", "booting");
+    try { window.emulator && window.emulator.destroy && window.emulator.destroy(); } catch (_) {}
+    window.emulator = startEmulator(imageOpts());
+  });
+
+  Promise.all([loadManifest(), fs9pAvailable()]).then(function (results) {
+    const hasFs9p = results[1];
+    window.__fs9pEnabled = hasFs9p;
     paintVersion(ISO_VERSION === "unversioned" ? "" : ISO_VERSION);
+
+    // When fs9p is on, v86 instantiates a virtio_9p device that the
+    // pre-9p savestate cannot satisfy.  Look for a side-by-side 9p
+    // variant ("…-9p.bin") instead; if it doesn't exist, cold-boot and
+    // the "save state" button will download the new file with the
+    // right suffix so future page loads restore instantly.
+    if (hasFs9p && SAVESTATE_URL) {
+      SAVESTATE_URL = SAVESTATE_URL.replace(/(\.bin)$/, "-9p$1");
+      console.info("[fs9p] manifest present — virtio-9p available, looking for 9p savestate at", SAVESTATE_URL);
+    } else if (hasFs9p) {
+      console.info("[fs9p] manifest present — virtio-9p available (no savestate configured)");
+    }
 
     if (!SAVESTATE_URL) {
       setStatus("cold boot — first time may take a few minutes", "booting");
@@ -389,10 +724,11 @@
           { initial_state: { url: SAVESTATE_URL } }
         ));
       } else {
-        console.info("[savestate] no", SAVESTATE_URL, "— cold-booting.",
-          "After boot finishes, click \"save state\" to download one for next time.");
-        setStatus("cold boot " + ISO_VERSION + " (" + IMAGE_KIND +
-                  ") — first time may take a few minutes", "booting");
+        const hint = hasFs9p
+          ? " (capture a 9p-compatible state with the 'save state' button)"
+          : " — click 'save state' after boot to download one for next time";
+        console.info("[savestate] no", SAVESTATE_URL, "— cold-booting.", hint);
+        setStatus("cold boot " + ISO_VERSION + " (" + IMAGE_KIND + ")" + hint, "booting");
         window.emulator = startEmulator(imageOpts());
       }
     });
@@ -874,3 +1210,167 @@ window.testLLMBridge = async function (goal) {
 
   bridgeHint("voice-dispatch: press Ctrl+Shift+V (Chrome mic permission required)");
 }());
+
+/* ============================================================================
+ * Operational timeline panel.
+ *
+ * `replay.sh` (and any future incident module) emits structured stage
+ * markers on the serial stream:
+ *
+ *   <AG-TL>{"_reset":true,"incident":"...","policy_hash":"..."}</AG-TL>
+ *   <AG-TL>{"_divider":true,"label":"ACT 1  …"}</AG-TL>
+ *   <AG-TL>{"stage":"agent.generation","title":"…","status":"done",
+ *           "ts":"...","act":1,"rows":[{"k":"…","v":"…","fail":true}],
+ *           "code":"…","code_lang":"diff"}</AG-TL>
+ *
+ * The byte-stream filter in startEmulator() strips these out of the
+ * xterm stream and calls window.__agentGateTimelineEmit() with the
+ * inner JSON.  This IIFE owns the DOM panel that displays them.
+ *
+ * The terminal pane remains the credibility surface — the same compact
+ * log lines that the VM prints to its UART.  The timeline is a parsed,
+ * designed projection of those same events.  No second source of truth.
+ * ============================================================================ */
+(function () {
+  "use strict";
+
+  const mainEl     = document.getElementById("main");
+  const stagesEl   = document.getElementById("tl-stages");
+  const incidentEl = document.getElementById("tl-incident-id");
+  const policyEl   = document.getElementById("tl-policy-hash");
+
+  if (!mainEl || !stagesEl) return;
+
+  // status → glyph in the round status badge on each stage card.
+  const ICONS = {
+    pending: "○",
+    active:  "◐",
+    done:    "●",
+    pass:    "✓",
+    fail:    "✗",
+    deny:    "⛔",
+  };
+
+  // Stable lookup from stage id → DOM node, so a second marker with the
+  // same stage id updates in place (useful for active → done transitions
+  // once we wire those up).
+  const stageNodes = new Map();
+
+  function formatTs(iso) {
+    // "2026-05-18T03:14:07.118Z" → "03:14:07.118"
+    if (!iso || typeof iso !== "string") return "";
+    const m = iso.match(/T(\d\d:\d\d:\d\d(?:\.\d+)?)/);
+    return m ? m[1] : iso;
+  }
+
+  function el(tag, cls, text) {
+    const n = document.createElement(tag);
+    if (cls)  n.className   = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+
+  // Diff line highlighter for the optional .code block on a stage.
+  // No external library — split on \n, classify each line, wrap in spans.
+  function renderCode(code, lang) {
+    const pre = el("pre", "tl-code lang-" + (lang || ""));
+    if (lang === "diff") {
+      const lines = String(code).split("\n");
+      for (const line of lines) {
+        let cls = "";
+        if      (line.startsWith("+++") || line.startsWith("---")) cls = "meta";
+        else if (line.startsWith("@@"))                            cls = "meta";
+        else if (line.startsWith("+"))                             cls = "add";
+        else if (line.startsWith("-"))                             cls = "del";
+        const span = el("span", cls, line + "\n");
+        pre.appendChild(span);
+      }
+    } else {
+      pre.textContent = code;
+    }
+    return pre;
+  }
+
+  function buildStage(ev) {
+    const div = el("div", "tl-stage");
+    div.dataset.stage  = ev.stage;
+    div.dataset.status = ev.status || "done";
+    if (ev.act) div.dataset.act = String(ev.act);
+
+    const head = el("div", "tl-stage-head");
+    head.appendChild(el("div", "tl-stage-icon", ICONS[ev.status] || ICONS.done));
+    head.appendChild(el("div", "tl-stage-title", ev.title || ev.stage));
+    head.appendChild(el("div", "tl-stage-ts",    formatTs(ev.ts)));
+    div.appendChild(head);
+
+    const rows = Array.isArray(ev.rows) ? ev.rows : [];
+    if (rows.length || ev.code) {
+      const body = el("div", "tl-stage-body");
+      for (const r of rows) {
+        const cls = "tl-row" + (r.fail ? " tl-row-fail" : (r.pass ? " tl-row-pass" : ""));
+        const rowEl = el("div", cls);
+        rowEl.appendChild(el("span", "tl-k", r.k));
+        rowEl.appendChild(el("span", "tl-v", r.v));
+        if (r.fail || r.pass) {
+          rowEl.appendChild(el("span", "tl-mark", r.fail ? "✗" : "✓"));
+        }
+        body.appendChild(rowEl);
+      }
+      if (ev.code) body.appendChild(renderCode(ev.code, ev.code_lang));
+      div.appendChild(body);
+    }
+
+    return div;
+  }
+
+  function handleReset(ev) {
+    mainEl.classList.add("has-timeline");
+    stagesEl.innerHTML = "";
+    stageNodes.clear();
+    if (incidentEl) incidentEl.textContent = ev.incident || "incident";
+    if (policyEl)   policyEl.textContent   = ev.policy_hash
+      ? ev.policy_hash.slice(0, 16) + "…"
+      : "";
+    if (policyEl && ev.policy_hash) policyEl.title = ev.policy_hash;
+  }
+
+  function handleDivider(ev) {
+    const d = el("div", "tl-divider", ev.label || "");
+    stagesEl.appendChild(d);
+  }
+
+  function handleStage(ev) {
+    if (!ev.stage) return;
+    const node = buildStage(ev);
+    const existing = stageNodes.get(ev.stage);
+    if (existing && existing.parentNode === stagesEl) {
+      stagesEl.replaceChild(node, existing);
+    } else {
+      stagesEl.appendChild(node);
+    }
+    stageNodes.set(ev.stage, node);
+    // Keep the newest stage visible without yanking the whole panel.
+    // (Guarded — scrollIntoView is undefined under jsdom test harnesses.)
+    if (typeof node.scrollIntoView === "function") {
+      node.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }
+
+  window.__agentGateTimelineEmit = function (jsonStr) {
+    let ev;
+    try { ev = JSON.parse(jsonStr); }
+    catch (e) {
+      console.warn("[timeline] bad marker JSON:", jsonStr, e);
+      return;
+    }
+    if (ev._reset)    return handleReset(ev);
+    if (ev._divider)  return handleDivider(ev);
+    if (ev.stage)     return handleStage(ev);
+    console.warn("[timeline] unrecognised marker:", ev);
+  };
+
+  // Debug affordance: drive the timeline from DevTools without v86.
+  //   window.__agentGateTimelineEmit('{"_reset":true,"incident":"demo"}')
+  //   window.__agentGateTimelineEmit('{"stage":"x","title":"X","status":"done","ts":"..."}')
+}());
+

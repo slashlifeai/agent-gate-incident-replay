@@ -1,0 +1,9 @@
+{"ts":"2026-05-18T03:45:22.014Z","kind":"agent.generation","actor":"agent-x","model":"claude-opus-4-7","artifact":"generated-diff.patch","prompt_hash":"sha256:b1fa5e7c0e8a2d6f3c9b1d2e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a","node":"workforce-node-7"}
+{"ts":"2026-05-18T03:45:22.118Z","kind":"commit.signature.verified","trigger_id":"deploy-2026-05-18-034522","signer":"agent-x@ai-workforce-os.local","algorithm":"ed25519"}
+{"ts":"2026-05-18T03:45:22.224Z","kind":"reviewer.signature.added","trigger_id":"deploy-2026-05-18-034522","reviewer":"alice@platform-owners"}
+{"ts":"2026-05-18T03:45:22.301Z","kind":"reviewer.signature.added","trigger_id":"deploy-2026-05-18-034522","reviewer":"bob@platform-owners"}
+{"ts":"2026-05-18T03:45:22.402Z","kind":"deployment.trigger","actor":"agent-x","trigger_id":"deploy-2026-05-18-034522","target":{"service":"payments-api","environment":"prod","commit_sha":"f2c9e07a8b3d1e5f4c0b9e2d7a4f1c8b6e3d0a7f"},"node":"workforce-node-7"}
+{"ts":"2026-05-18T03:45:22.418Z","kind":"approval.state.observed","trigger_id":"deploy-2026-05-18-034522","valid":true,"min_reviewers_required":2,"min_reviewers_observed":2,"commit_signature_verified":true,"provenance_attestation_present":true,"self_approval_detected":false}
+{"ts":"2026-05-18T03:45:22.421Z","kind":"policy.evaluated","policy":"sl.ai.policy.deployment-approval","reason_code":"approval_chain_valid","trigger_id":"deploy-2026-05-18-034522"}
+{"ts":"2026-05-18T03:45:22.425Z","kind":"gate.decision","policy":"sl.ai.policy.deployment-approval","verdict":"PASS","decision":"permit","trigger_id":"deploy-2026-05-18-034522"}
+{"ts":"2026-05-18T03:45:22.427Z","kind":"evidence.sealed","scheme":"agent.gate.result.v0","evidence_sha256":"a7f4c1d8e5b2a9f6c3d0e7b4a1f8c5e2d9b6a3c0f7e4d1b8c5a2f9e6d3b0a7c4","policy_hash_sha256":"9c4f2a7b1e6d3f8a5c0b9e2d7a4f1c8b6e3d0a7f4b1c8e5d2a9f6c3b0e7d4a1f","bootloader_stamped":true,"trigger_id":"deploy-2026-05-18-034522"}

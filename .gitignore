@@ -27,3 +27,7 @@ bios/
 .cache/
 dist/
 tmp/
+
+# Generated v86 9p filesystem image — rebuilt by scripts/build-fs9p.mjs.
+fs9p/
+fs9p.json

@@ -1,0 +1,42 @@
+{
+  "schema_version": "agent.gate.approval_state.v0",
+  "trigger_id": "deploy-2026-05-18-034522",
+  "target": {
+    "service": "payments-api",
+    "environment": "prod",
+    "commit_sha": "f2c9e07a8b3d1e5f4c0b9e2d7a4f1c8b6e3d0a7f"
+  },
+  "commit_signature": {
+    "present": true,
+    "verified": true,
+    "signer": "agent-x@ai-workforce-os.local",
+    "algorithm": "ed25519",
+    "signature_sha256": "3e8a1b4f7c2d9e6a0b5f8c1d4e7a2b9f6c3d0e7a4b1c8d5e2f9a6c3b0d7e4a1f"
+  },
+  "reviewer_signatures": [
+    {
+      "reviewer": "alice@platform-owners",
+      "algorithm": "ed25519",
+      "signed_at": "2026-05-18T03:42:11Z",
+      "signature_sha256": "7b3e0c6a9f4d1e8b5a2c9d6f3b0e7a4c1d8e5f2b9a6c3d0e7f4a1b8c5d2e9f6a"
+    },
+    {
+      "reviewer": "bob@platform-owners",
+      "algorithm": "ed25519",
+      "signed_at": "2026-05-18T03:44:08Z",
+      "signature_sha256": "c2d9e6f3b0a7c4e1d8b5f2a9c6e3d0b7a4f1c8e5d2b9f6a3c0e7d4b1a8f5c2e9"
+    }
+  ],
+  "provenance_attestation": {
+    "present": true,
+    "builder": "ai-workforce-os/build-attestor@v0.4.2",
+    "predicate_type": "https://slsa.dev/provenance/v1"
+  },
+  "self_approval": {
+    "detected": false
+  },
+  "min_reviewers_required": 2,
+  "min_reviewers_observed": 2,
+  "valid": true,
+  "violations": []
+}

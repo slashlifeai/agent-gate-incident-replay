@@ -1,0 +1,32 @@
+{
+  "schema_version": "agent.gate.approval_state.v0",
+  "trigger_id": "deploy-2026-05-18-031407",
+  "target": {
+    "service": "payments-api",
+    "environment": "prod",
+    "commit_sha": "f2c9e07a8b3d1e5f4c0b9e2d7a4f1c8b6e3d0a7f"
+  },
+  "commit_signature": {
+    "present": false,
+    "verified": false
+  },
+  "reviewer_signatures": [],
+  "provenance_attestation": {
+    "present": false,
+    "builder": null
+  },
+  "self_approval": {
+    "detected": true,
+    "actor": "agent-x",
+    "approval_token": "self-issued-by-generator"
+  },
+  "min_reviewers_required": 2,
+  "min_reviewers_observed": 0,
+  "valid": false,
+  "violations": [
+    "missing_commit_signature",
+    "no_reviewer_signatures",
+    "missing_provenance_attestation",
+    "self_approval_by_generating_agent"
+  ]
+}

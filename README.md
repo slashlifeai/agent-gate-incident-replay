@@ -24,6 +24,7 @@ the reducer emits real `VERDICT: FAIL` / `VERDICT: PASS` output.
 git clone https://github.com/slashlifeai/agent-gate-incident-replay
 cd agent-gate-incident-replay
 pnpm install && pnpm sync:vendor      # browser vendor JS/WASM/CSS
+pnpm build:fs9p                       # incidents/ → fs9p.json + fs9p/ blobs
 scripts/fetch-artifacts.sh            # ISO + savestate + BIOS (~950 MB)
 python3 -m http.server 8080
 ```
@@ -38,12 +39,44 @@ Then open <http://localhost:8080>.
 `demo.js` accepts:
 
 ```text
-?case=<name>     -> agent-gate-demo <name>
+?case=<name>     -> if incidents/<name>/incident.json exists, the harness
+                    mounts that module into the VM at /mnt/incident and
+                    runs its replay.sh.  Otherwise it falls back to the
+                    ISO-baked binary "agent-gate-demo <name>".
 ?run=<command>   -> run command verbatim
 ?goal=<text>     -> agent-gate-llm-agent "<text>"
 ```
 
-See [Guest VM Usage](#guest-vm-usage) for the available `<name>` values.
+See [Guest VM Usage](#guest-vm-usage) for the ISO-baked `<name>` values,
+and [`incidents/`](incidents/) for mounted incident modules.
+
+### How incidents are mounted
+
+`pnpm build:fs9p` packs the `incidents/` tree into `fs9p.json` (a v86
+9p filesystem manifest) plus a content-addressed `fs9p/` blob store.
+At runtime v86 exposes those files to the guest as a virtio-9p device
+tagged `host9p`.  When you visit `?case=<name>` the harness sends one
+shell line into the VM:
+
+```bash
+sudo mkdir -p /mnt/incident
+sudo mount -t 9p -o trans=virtio,version=9p2000.L,access=any host9p /mnt/incident
+/mnt/incident/<name>/replay.sh
+```
+
+If anything in that chain fails (no `9p_virtio` in the kernel, sudoers
+denies the mount, manifest not built) the harness falls back to a
+base64-over-serial inject path that streams the same files into
+`/tmp/incident`.  Slower, visually noisier, but works on any kernel.
+
+**Savestate caveat.** Adding the 9p device changes the v86 state
+schema.  A savestate captured *without* `filesystem:` will crash on
+restore because the saved state has no slot for the virtio-9p device
+— the harness detects this within the first few seconds and
+automatically falls back to a cold boot, then prints a status hint
+asking you to click **save state** to capture a 9p-compatible
+checkpoint.  Replace `agent-gate-savestate-<iso-version>.bin` with
+the file you download and future page loads restore instantly.
 
 ## Repository Role
 
@@ -161,6 +194,12 @@ machine.
     $ agent-gate-demo readonly-pass              # first PASS case (read-only inspect)
     $ agent-gate-demo repo-publish-approval      # human_approval_required verdict
     # URL deep-link: append  ?case=<name>   (any of the above) to auto-run
+
+  Mounted incident modules (streamed in over serial — no ISO rebuild):
+    ?case=deployment-approval-bypass             # AI-generated deploy with
+                                                 # no signed approval chain
+                                                 # → FAIL then PASS (~15s)
+    ?case=credential-boundary-escape             # cross-agent credential read
 
   Compose a boss-readable supervisor report from any past run:
     $ agent-gate-report                          # uses ~/agent-gate-demo/latest

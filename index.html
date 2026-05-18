@@ -87,10 +87,17 @@
     button.hbtn:disabled { opacity: 0.4; cursor: default; }
     button.hbtn.hidden   { display: none; }
 
+    #main {
+      display: flex;
+      flex-direction: row;
+      height: calc(100vh - 41px);
+      min-height: 0;
+    }
     #terminal-wrap {
       display: flex;
       flex-direction: column;
-      height: calc(100vh - 41px);
+      flex: 1 1 auto;
+      min-width: 0;
       padding: 8px;
     }
     #terminal { flex: 1; min-height: 0; }
@@ -98,6 +105,178 @@
     .xterm,
     .xterm-viewport,
     .xterm-screen { background: #0a0a0a !important; }
+
+    /* ── Timeline panel ──────────────────────────────────────────────
+       Hidden by default.  When the harness sees its first <AG-TL>
+       marker on the serial stream it adds .has-timeline to #main, which
+       reveals the panel and shrinks the terminal pane to a side column. */
+    #timeline {
+      display: none;
+      flex-direction: column;
+      flex: 1 1 0;
+      min-width: 0;
+      border-right: 1px solid #1e1e1e;
+      overflow-y: auto;
+      padding: 14px 18px 24px 18px;
+      background: #0a0a0a;
+    }
+    #main.has-timeline #timeline       { display: flex; flex: 1.4 1 0; }
+    #main.has-timeline #terminal-wrap  { flex: 1 1 0; min-width: 360px; max-width: 46%; border-left: 0; }
+
+    .tl-header {
+      display: flex;
+      align-items: baseline;
+      gap: 14px;
+      padding-bottom: 10px;
+      margin-bottom: 14px;
+      border-bottom: 1px solid #1e1e1e;
+    }
+    .tl-header .tl-incident-id {
+      font-size: 13px;
+      letter-spacing: 0.05em;
+      color: #d4d4d4;
+      font-weight: bold;
+    }
+    .tl-header .tl-policy {
+      font-size: 11px;
+      color: #666;
+      letter-spacing: 0.03em;
+    }
+    .tl-header .tl-policy code {
+      color: #888;
+      font-family: inherit;
+    }
+
+    .tl-stages {
+      position: relative;
+      padding-left: 22px;
+    }
+    /* vertical connector line behind the status icons */
+    .tl-stages::before {
+      content: "";
+      position: absolute;
+      left: 9px;
+      top: 6px;
+      bottom: 6px;
+      width: 1px;
+      background: #1e1e1e;
+    }
+
+    .tl-divider {
+      position: relative;
+      margin: 14px 0 10px -22px;
+      padding-left: 22px;
+      font-size: 10px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: #666;
+    }
+    .tl-divider::before {
+      content: "";
+      display: inline-block;
+      width: 10px;
+      height: 1px;
+      background: #333;
+      vertical-align: middle;
+      margin-right: 8px;
+    }
+
+    .tl-stage {
+      position: relative;
+      padding: 6px 0 10px 18px;
+    }
+    .tl-stage-head {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+    }
+    .tl-stage-icon {
+      position: absolute;
+      left: -22px;
+      top: 6px;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: #0a0a0a;
+      border: 1px solid #333;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      line-height: 1;
+      color: #555;
+    }
+    .tl-stage-title {
+      flex: 1;
+      font-size: 11px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: #aaa;
+    }
+    .tl-stage-ts {
+      font-size: 10px;
+      color: #555;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .tl-stage-body {
+      margin-top: 6px;
+      margin-left: 0;
+      font-size: 12px;
+      color: #999;
+      line-height: 1.55;
+    }
+    .tl-row {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      padding: 1px 0;
+    }
+    .tl-row .tl-k {
+      flex: 0 0 11em;
+      color: #666;
+      letter-spacing: 0.02em;
+    }
+    .tl-row .tl-v {
+      flex: 1;
+      color: #c4c4c4;
+      word-break: break-all;
+    }
+    .tl-row .tl-mark {
+      flex: 0 0 auto;
+      font-size: 11px;
+    }
+    .tl-row.tl-row-fail .tl-v   { color: #e87474; }
+    .tl-row.tl-row-fail .tl-mark{ color: #e87474; }
+    .tl-row.tl-row-pass .tl-v   { color: #5cc88a; }
+    .tl-row.tl-row-pass .tl-mark{ color: #5cc88a; }
+
+    .tl-code {
+      margin-top: 8px;
+      padding: 8px 10px;
+      background: #0d0d0d;
+      border: 1px solid #1e1e1e;
+      font-size: 11.5px;
+      color: #999;
+      white-space: pre;
+      overflow-x: auto;
+      line-height: 1.45;
+    }
+    .tl-code .add { color: #5cc88a; }
+    .tl-code .del { color: #e87474; }
+    .tl-code .meta { color: #555; }
+
+    /* status palette */
+    .tl-stage[data-status="done"]    > .tl-stage-head .tl-stage-icon { color: #cfcfcf; border-color: #555; }
+    .tl-stage[data-status="active"]  > .tl-stage-head .tl-stage-icon { color: #e5e510; border-color: #b0b000; animation: pulse 1s infinite; }
+    .tl-stage[data-status="pending"] > .tl-stage-head .tl-stage-icon { color: #444;    border-color: #2a2a2a; }
+    .tl-stage[data-status="fail"]    > .tl-stage-head .tl-stage-icon,
+    .tl-stage[data-status="deny"]    > .tl-stage-head .tl-stage-icon { color: #f14c4c; border-color: #cd3131; background: #170d0d; }
+    .tl-stage[data-status="pass"]    > .tl-stage-head .tl-stage-icon { color: #23d18b; border-color: #2e7d32; background: #0d1410; }
+
+    .tl-stage[data-status="deny"]   > .tl-stage-head .tl-stage-title { color: #f14c4c; }
+    .tl-stage[data-status="pass"]   > .tl-stage-head .tl-stage-title { color: #23d18b; }
+    .tl-stage[data-status="fail"]   > .tl-stage-head .tl-stage-title { color: #e87474; }
 
     /* gesture overlay — only shown when Gemini Nano needs first-time
        download (Chrome requires a user gesture for that) */
@@ -170,8 +349,17 @@
       <button id="savestate-btn" class="hbtn hidden" title="Download a v86 savestate so the next page-load is instant">save state</button>
     </div>
   </div>
-  <div id="terminal-wrap">
-    <div id="terminal"></div>
+  <div id="main">
+    <div id="timeline" aria-label="Operational timeline">
+      <div class="tl-header">
+        <span class="tl-incident-id" id="tl-incident-id">incident</span>
+        <span class="tl-policy">policy <code id="tl-policy-hash"></code></span>
+      </div>
+      <div class="tl-stages" id="tl-stages"></div>
+    </div>
+    <div id="terminal-wrap">
+      <div id="terminal"></div>
+    </div>
   </div>
 
   <script src="xterm.js"></script>

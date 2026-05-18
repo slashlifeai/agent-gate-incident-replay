@@ -1,0 +1,32 @@
+{
+  "schema_version": "agent.gate.policy.v0",
+  "id": "sl.ai.policy.deployment-approval",
+  "title": "Production deployment requires signed reviewer chain",
+  "scope": {
+    "trigger_kinds": ["deployment.production"],
+    "environments": ["prod", "production"]
+  },
+  "requirements": {
+    "approval_chain": {
+      "min_reviewers": 2,
+      "reviewer_set": "platform-owners",
+      "signing_algorithm": "ed25519",
+      "commit_signature_required": true,
+      "provenance_attestation_required": true,
+      "max_age_seconds": 86400
+    },
+    "disallowed_actors": [
+      {"kind": "llm-agent", "rationale": "agents cannot self-approve a deployment they generated"}
+    ]
+  },
+  "decisions": {
+    "approval_chain_valid": "permit",
+    "approval_chain_invalid": "deny",
+    "self_approval_detected": "deny"
+  },
+  "attestation": {
+    "policy_hash_sha256": "9c4f2a7b1e6d3f8a5c0b9e2d7a4f1c8b6e3d0a7f4b1c8e5d2a9f6c3b0e7d4a1f",
+    "bootloader_stamped": true,
+    "trust_anchor": "/proc/cmdline:aiwos.policy_hash"
+  }
+}

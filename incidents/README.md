@@ -14,3 +14,10 @@ credential-boundary-escape
 It demonstrates an agent attempting to read another agent's credential, producing
 a blocking runtime event and an Agent Gate `VERDICT: FAIL`, followed by a
 permitted path that produces `VERDICT: PASS`.
+
+## Catalog
+
+| Incident | Category | Verdict sequence |
+|---|---|---|
+| [`credential-boundary-escape`](credential-boundary-escape/) | credential-boundary | FAIL → PASS |
+| [`deployment-approval-bypass`](deployment-approval-bypass/) | deployment-approval | FAIL → PASS |
