@@ -10,6 +10,41 @@ boundaries and real Agent Gate verdicts.
 No mock terminal. No simulated verdict. The OS boots, the audit chain runs, and
 the reducer emits real `VERDICT: FAIL` / `VERDICT: PASS` output.
 
+## Quick Start
+
+### Prerequisites
+
+- Node.js with [pnpm](https://pnpm.io) 10 — pulls `libv86.js`, `v86.wasm`, and `xterm` from npm.
+- Python 3 — used by `scripts/fetch-artifacts.sh` to parse `manifest.json` and to serve the runtime locally.
+- Optional: [GitHub CLI](https://cli.github.com) (`gh auth login`) — speeds up release downloads. Without it the script falls back to anonymous HTTPS.
+
+### Run
+
+```bash
+git clone https://github.com/slashlifeai/agent-gate-incident-replay
+cd agent-gate-incident-replay
+pnpm install && pnpm sync:vendor      # browser vendor JS/WASM/CSS
+scripts/fetch-artifacts.sh            # ISO + savestate + BIOS (~950 MB)
+python3 -m http.server 8080
+```
+
+Then open <http://localhost:8080>.
+
+`scripts/fetch-artifacts.sh` is idempotent — files already matching the
+`*_sha256` entries in `manifest.json` are skipped, so re-running is safe.
+
+### URL deep links
+
+`demo.js` accepts:
+
+```text
+?case=<name>     -> agent-gate-demo <name>
+?run=<command>   -> run command verbatim
+?goal=<text>     -> agent-gate-llm-agent "<text>"
+```
+
+See [Guest VM Usage](#guest-vm-usage) for the available `<name>` values.
+
 ## Repository Role
 
 This repository owns the replay runtime:
@@ -101,30 +136,6 @@ bios/seabios.bin
 bios/vgabios.bin
 ai-workforce-os-v86-demo-x86_64-linux.iso
 agent-gate-savestate-6182f0a2d792.bin
-```
-
-## Local Smoke Run
-
-After clone:
-
-```bash
-pnpm install && pnpm sync:vendor   # browser vendor JS/WASM/CSS
-scripts/fetch-artifacts.sh         # ISO, savestate, BIOS
-python3 -m http.server 8080
-```
-
-Then open:
-
-```text
-http://localhost:8080
-```
-
-Existing deep links supported by `demo.js`:
-
-```text
-?case=<name>   -> agent-gate-demo <name>
-?run=<command> -> run command verbatim
-?goal=<text>   -> agent-gate-llm-agent "<text>"
 ```
 
 The long-term target is to replace case-specific ISO contents with mounted
@@ -225,3 +236,7 @@ to git history. `scripts/fetch-artifacts.sh` downloads them after clone:
 
 The browser runtime reads local artifact paths from `manifest.json`; it does
 not fetch ISO or savestate URLs at runtime.
+
+## License
+
+[Apache License 2.0](LICENSE).
