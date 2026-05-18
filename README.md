@@ -1,11 +1,7 @@
 # Agent Gate Incident Replay
 
-Replay real AI-agent incidents in a governed runtime.
-
-Agent Gate Incident Replay restores a real VM state in the browser with
-[v86](https://github.com/copy/v86), mounts an incident module, and replays
-agent behavior against actual runtime boundaries and deterministic Agent Gate
-verdicts.
+Restore a governed runtime in the browser and replay real AI-agent incidents
+against actual runtime boundaries and deterministic gate verdicts.
 
 This is not a simulated terminal demo.
 
@@ -19,7 +15,9 @@ VERDICT: PASS
 
 outputs from the replayed execution path.
 
-## AI agents are increasingly allowed to access:
+## Why Replay Matters
+
+AI agents are increasingly allowed to access:
 
 * production credentials
 * deployment pipelines
@@ -63,7 +61,7 @@ The replay runtime is built around three artifact types:
 
 | Artifact | Purpose |
 |---|---|
-| State | VM image and blackbox savestate restoring the replay environment |
+| State | VM image and restorable VM checkpoint restoring the replay environment |
 | Module | Mounted incident package containing metadata, fixtures, entrypoints, and expected verdicts |
 | Trace | Runtime transcript, audit evidence, reducer output, and replay artifacts |
 
@@ -83,9 +81,9 @@ Gate Reducer
 PASS / FAIL Verdict
 ```
 
-Savestates are not boot caches.
+VM checkpoints are not boot caches.
 
-They are runtime checkpoints used to restore the exact environment where an
+They are restorable runtime snapshots that capture the exact environment where an
 AI-agent incident is replayed and evaluated.
 
 ---
@@ -93,7 +91,7 @@ AI-agent incident is replayed and evaluated.
 ## Browser Runtime
 
 The browser runtime restores a governed execution environment directly inside
-the browser.
+the browser. No backend replay service is required.
 
 It loads:
 
@@ -147,6 +145,8 @@ Then open:
 ```text
 http://localhost:8080
 ```
+
+The runtime restores from a prebuilt savestate for near-instant replay startup.
 
 ![Agent Gate Incident Replay showing a credential-access-fail case](agent-gate-incident-replay-screenshot.png)
 
@@ -293,7 +293,7 @@ The restored execution environment exposes verifiable identity and policy bindin
 company node info
 ```
 
-Example output:
+Example attested runtime identity:
 
 ```text
 Node Info
@@ -363,8 +363,8 @@ Replayable incidents provide reproducible operational evidence for:
 * incident disclosure
 * runtime verification
 
-As AI agents gain access to production environments,
-replayable execution becomes part of the operational trust boundary.
+> As AI agents gain access to production environments, replayable execution
+> becomes part of the operational trust boundary.
 
 ---
 
