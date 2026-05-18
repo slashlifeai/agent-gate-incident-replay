@@ -247,22 +247,6 @@ ls -la /run/homomorphix/credentials/
 
 ---
 
-## Workforce Packages
-
-The runtime also supports Workforce Package (.wfpkg) validation flows.
-
-Example:
-
-```bash
-wfsdk-cli pack \
-  --agent /etc/ai-workforce-os/sample-packages/refund-agent.toml \
-  --output /tmp/refund-agent.wfpkg
-wfpkg test /tmp/refund-agent.wfpkg
-wfpkg list
-```
-
----
-
 ## Artifact Fetching
 
 Large runtime artifacts are distributed as GitHub Release assets instead of
