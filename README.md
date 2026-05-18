@@ -33,6 +33,8 @@ Then open <http://localhost:8080>.
 `scripts/fetch-artifacts.sh` is idempotent — files already matching the
 `*_sha256` entries in `manifest.json` are skipped, so re-running is safe.
 
+![Agent Gate Incident Replay showing a credential-access-fail case](agent-gate-incident-replay-screenshot.png)
+
 ### URL deep links
 
 `demo.js` accepts:
