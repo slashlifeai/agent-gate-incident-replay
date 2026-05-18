@@ -1,5 +1,6 @@
 # Per-repo agent stack config for Agent Gate Incident Replay.
 blueprint_version: "0.1"
+spec_version: "0.1.0"
 
 project_type: browser-runtime
 
