@@ -283,6 +283,51 @@ against the hashes defined in `manifest.json`.
 
 ---
 
+## Verifiable Runtime Identity
+
+The replay runtime is not a mocked terminal session.
+
+The restored execution environment exposes verifiable identity and policy bindings:
+
+```bash
+company node info
+```
+
+Example output:
+
+```text
+Node Info
+  os: AI Workforce OS 26.05 (Yarara)
+  world_id: world.demo.acme-payments
+  principal_id: principal.demo.acme-payments.coordinator
+  boot_policy_hash:
+    sha256:141d0fbdf4eaf34f2af59e2413c5b9ae8a0946a6c1ee43de1c7376ce796dff2b
+  approval_policy_hash:
+    sha256:12271937c224c6342f198121eb654513898490274f127f2dc53eea88c4894eee
+  generation_diverged: false
+```
+
+Inside the replay environment, you can verify:
+
+```bash
+cat /etc/ai-workforce-os/world.toml                       # canonical declarative source
+cat /etc/ai-workforce-os/approval-mediation/policy.json   # approval rules (sha256 attested)
+cat /proc/cmdline | tr ' ' '\n' | grep aiwos.policy_hash  # bootloader-stamped (trust anchor)
+cat /run/aiwos/policy_hash                                # same hash, convenience copy
+```
+
+The replay verdict is derived from the restored governed runtime,
+not from simulated frontend state.
+
+This runtime exposes:
+
+* immutable runtime identity
+* policy-attested execution state
+* world ownership bindings
+* reproducible system provenance
+
+---
+
 ## Repository Role
 
 This repository owns:
