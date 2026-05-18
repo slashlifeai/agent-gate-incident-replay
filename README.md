@@ -1,133 +1,99 @@
 # Agent Gate Incident Replay
 
-Agent Gate Incident Replay is a browser-runnable blackbox replay runtime for
-AI-agent incidents.
+Restore a governed runtime in the browser and replay real AI-agent incidents
+against actual runtime boundaries and deterministic gate verdicts.
 
-It restores a real VM state in the browser with [v86](https://github.com/copy/v86),
-mounts an incident module, and replays the agent's actions against real runtime
-boundaries and real Agent Gate verdicts.
+This is not a simulated terminal demo.
 
-No mock terminal. No simulated verdict. The OS boots, the audit chain runs, and
-the reducer emits real `VERDICT: FAIL` / `VERDICT: PASS` output.
-
-## Quick Start
-
-### Prerequisites
-
-- Node.js with [pnpm](https://pnpm.io) 10 — pulls `libv86.js`, `v86.wasm`, and `xterm` from npm.
-- Python 3 — used by `scripts/fetch-artifacts.sh` to parse `manifest.json` and to serve the runtime locally.
-- Optional: [GitHub CLI](https://cli.github.com) (`gh auth login`) — speeds up release downloads. Without it the script falls back to anonymous HTTPS.
-
-### Run
-
-```bash
-git clone https://github.com/slashlifeai/agent-gate-incident-replay
-cd agent-gate-incident-replay
-pnpm install && pnpm sync:vendor      # browser vendor JS/WASM/CSS
-pnpm build:fs9p                       # incidents/ → fs9p.json + fs9p/ blobs
-scripts/fetch-artifacts.sh            # ISO + savestate + BIOS (~950 MB)
-python3 -m http.server 8080
-```
-
-Then open <http://localhost:8080>.
-
-`scripts/fetch-artifacts.sh` is idempotent — files already matching the
-`*_sha256` entries in `manifest.json` are skipped, so re-running is safe.
-
-### URL deep links
-
-`demo.js` accepts:
+The runtime restores from a real VM checkpoint, the audit chain executes, and
+the gate reducer emits real:
 
 ```text
-?case=<name>     -> if incidents/<name>/incident.json exists, the harness
-                    mounts that module into the VM at /mnt/incident and
-                    runs its replay.sh.  Otherwise it falls back to the
-                    ISO-baked binary "agent-gate-demo <name>".
-?run=<command>   -> run command verbatim
-?goal=<text>     -> agent-gate-llm-agent "<text>"
+VERDICT: FAIL
+VERDICT: PASS
 ```
 
-See [Guest VM Usage](#guest-vm-usage) for the ISO-baked `<name>` values,
-and [`incidents/`](incidents/) for mounted incident modules.
+outputs from the replayed execution path.
 
-### How incidents are mounted
+## Why Replay Matters
 
-`pnpm build:fs9p` packs the `incidents/` tree into `fs9p.json` (a v86
-9p filesystem manifest) plus a content-addressed `fs9p/` blob store.
-At runtime v86 exposes those files to the guest as a virtio-9p device
-tagged `host9p`.  When you visit `?case=<name>` the harness sends one
-shell line into the VM:
+AI agents are increasingly allowed to access:
+
+* production credentials
+* deployment pipelines
+* repositories
+* internal tooling
+* operational infrastructure
+
+When incidents happen, logs are not enough.
+
+Replayable execution becomes operational evidence.
+
+---
+
+## What You Can Replay
+
+The current runtime supports replaying incidents such as:
+
+* credential boundary violations
+* unauthorized model invocation
+* network egress attempts
+* privilege escalation attempts
+* repository publication approval workflows
+* read-only PASS cases
+
+Example replay cases:
 
 ```bash
-sudo mkdir -p /mnt/incident
-sudo mount -t 9p -o trans=virtio,version=9p2000.L,access=any host9p /mnt/incident
-/mnt/incident/<name>/replay.sh
+agent-gate-demo credential-access-fail
+agent-gate-demo network-egress-fail
+agent-gate-demo sudo-escalation-fail
+agent-gate-demo model-deny-fail
+agent-gate-demo readonly-pass
+agent-gate-demo repo-publish-approval
 ```
 
-If anything in that chain fails (no `9p_virtio` in the kernel, sudoers
-denies the mount, manifest not built) the harness falls back to a
-base64-over-serial inject path that streams the same files into
-`/tmp/incident`.  Slower, visually noisier, but works on any kernel.
+---
 
-**Savestate caveat.** Adding the 9p device changes the v86 state
-schema.  A savestate captured *without* `filesystem:` will crash on
-restore because the saved state has no slot for the virtio-9p device
-— the harness detects this within the first few seconds and
-automatically falls back to a cold boot, then prints a status hint
-asking you to click **save state** to capture a 9p-compatible
-checkpoint.  Replace `agent-gate-savestate-<iso-version>.bin` with
-the file you download and future page loads restore instantly.
+## Runtime Model
 
-## Repository Role
-
-This repository owns the replay runtime:
-
-- v86 and xterm.js browser loading surface;
-- blackbox savestate restore flow;
-- incident module loading contract;
-- public incident catalog layout;
-- transcript and expected-verdict verification workflow;
-- artifact manifests for VM images, savestates, and incident packs.
-
-It does not own Agent Gate verdict semantics. The evidence schema and
-deterministic reducer live in `agent-gate-core`.
-
-## Blackbox Model
-
-The replay runtime is designed around three artifact types:
+The replay runtime is built around three artifact types:
 
 | Artifact | Purpose |
 |---|---|
-| State | A VM image and blackbox savestate that restore the replay environment. |
-| Module | A mounted incident directory containing metadata, entrypoint, fixtures, and expected verdicts. |
-| Trace | Transcript, runtime events, audit evidence, and reducer output used to inspect the replay. |
+| State | VM image and restorable VM checkpoint restoring the replay environment |
+| Module | Mounted incident package containing metadata, fixtures, entrypoints, and expected verdicts |
+| Trace | Runtime transcript, audit evidence, reducer output, and replay artifacts |
 
-Savestates are not just boot caches. They are runtime checkpoints that let an
-operator restore the environment where an agent incident is replayed.
-
-## Incident Modules
-
-Incident cases are mounted into the VM instead of baked into the ISO. This keeps
-the runtime stable while allowing the incident catalog to grow independently.
-
-The VM should see the selected module at:
+Replay flow:
 
 ```text
-/mnt/incident
+State
+  ↓
+Incident Module
+  ↓
+Replay Execution
+  ↓
+Audit Trace
+  ↓
+Gate Reducer
+  ↓
+PASS / FAIL Verdict
 ```
 
-The default VM-side entrypoint is:
+VM checkpoints are not boot caches.
 
-```bash
-agent-gate-replay /mnt/incident
-```
+They are restorable runtime snapshots that capture the exact environment where an
+AI-agent incident is replayed and evaluated.
 
-See [specs/incident-module.md](specs/incident-module.md) for the module
-contract.
+---
 
-## Current Browser Runtime
+## Browser Runtime
 
-The current browser harness loads:
+The browser runtime restores a governed execution environment directly inside
+the browser. No backend replay service is required.
+
+It loads:
 
 ```text
 index.html
@@ -135,147 +101,266 @@ demo.js
 manifest.json
 ```
 
-Large runtime files are intentionally not committed:
+and restores:
+
+* VM state
+* audit environment
+* runtime policies
+* incident module
+* gate reducer execution path
+
+The runtime executes against:
+
+* real runtime constraints
+* real filesystem boundaries
+* real policy reducers
+* real audit artifacts
+
+No mock terminal.
+No simulated verdict.
+
+---
+
+## Quick Start
+
+### Prerequisites
+
+* Node.js with [pnpm](https://pnpm.io) 10
+* Python 3
+* Optional: [GitHub CLI](https://cli.github.com)
+
+### Run
+
+```bash
+git clone https://github.com/slashlifeai/agent-gate-incident-replay
+cd agent-gate-incident-replay
+pnpm install
+pnpm sync:vendor
+scripts/fetch-artifacts.sh
+python3 -m http.server 8080
+```
+
+Then open:
+
+```text
+http://localhost:8080
+```
+
+The runtime restores from a prebuilt savestate for near-instant replay startup.
+
+![Agent Gate Incident Replay showing a credential-access-fail case](agent-gate-incident-replay-screenshot.png)
+
+---
+
+## URL Deep Links
+
+The runtime accepts deep-link replay execution:
+
+```text
+?case=<name>     -> replay predefined incident case
+?run=<command>   -> execute command inside replay runtime
+?goal=<text>     -> drive LLM agent through Agent Gate
+```
+
+Example:
+
+```text
+?case=credential-access-fail
+?case=deployment-approval-bypass
+```
+
+---
+
+## Incident Modules
+
+Incident cases are mounted dynamically into the runtime instead of baked into
+the ISO image.
+
+This allows:
+
+* independent incident evolution
+* replay catalog growth
+* deterministic runtime reuse
+* modular incident distribution
+
+Mounted path inside the VM:
+
+```text
+/mnt/incident
+```
+
+Default runtime entrypoint:
+
+```bash
+agent-gate-replay /mnt/incident
+```
+
+See [specs/incident-module.md](specs/incident-module.md) for the module contract.
+
+---
+
+## Guest VM Usage
+
+These commands execute inside the restored AI Workforce OS runtime.
+
+### Replay Incidents
+
+```bash
+agent-gate-demo
+agent-gate-demo credential-access-fail
+agent-gate-demo network-egress-fail
+agent-gate-demo sudo-escalation-fail
+agent-gate-demo model-deny-fail
+agent-gate-demo readonly-pass
+agent-gate-demo repo-publish-approval
+```
+
+### Generate Supervisor Reports
+
+```bash
+agent-gate-report
+agent-gate-report ~/agent-gate-demo/credential-access-fail/latest
+```
+
+### Verify Gate Evidence
+
+```bash
+cat ~/agent-gate-demo/latest/policy-result.json
+cat ~/agent-gate-demo/latest/gate-result.json
+cat ~/agent-gate-demo/latest/gate-pass.json
+```
+
+### Verify Runtime Integrity
+
+```bash
+cat /etc/ai-workforce-os/world.toml
+cat /etc/ai-workforce-os/approval-mediation/policy.json
+cat /proc/cmdline | tr ' ' '\n' | grep aiwos.policy_hash
+cat /run/aiwos/policy_hash
+```
+
+### Verify Agent Isolation
+
+```bash
+id agent-x
+ls -la /run/homomorphix/credentials/
+```
+
+---
+
+## Artifact Fetching
+
+Large runtime artifacts are distributed as GitHub Release assets instead of
+being committed into git history.
+
+Artifacts include:
 
 ```text
 libv86.js
 v86.wasm
-xterm.js
-xterm.css
-xterm-addon-fit.js
 bios/
 ai-workforce-os-v86-demo-x86_64-linux.iso
 agent-gate-*.bin
 ```
 
-They should be published as release artifacts with hashes in the runtime
-manifest.
+`scripts/fetch-artifacts.sh` downloads and verifies all runtime artifacts
+against the hashes defined in `manifest.json`.
 
-The browser JavaScript/WASM vendor assets are pinned with pnpm:
+---
+
+## Verifiable Runtime Identity
+
+The replay runtime is not a mocked terminal session.
+
+The restored execution environment exposes verifiable identity and policy bindings:
 
 ```bash
-pnpm install
-pnpm sync:vendor
+company node info
 ```
 
-`pnpm sync:vendor` copies `libv86.js`, `v86.wasm`, xterm.js, xterm.css, and
-the xterm fit addon from `node_modules` into the static runtime root.
-
-BIOS files, VM images, and savestates are runtime artifacts. They are not
-included in the v86 npm package and must be fetched separately:
+Example attested runtime identity:
 
 ```text
-bios/seabios.bin
-bios/vgabios.bin
-ai-workforce-os-v86-demo-x86_64-linux.iso
-agent-gate-savestate-6182f0a2d792.bin
+Node Info
+  os: AI Workforce OS 26.05 (Yarara)
+  world_id: world.demo.acme-payments
+  principal_id: principal.demo.acme-payments.coordinator
+  boot_policy_hash:
+    sha256:141d0fbdf4eaf34f2af59e2413c5b9ae8a0946a6c1ee43de1c7376ce796dff2b
+  approval_policy_hash:
+    sha256:12271937c224c6342f198121eb654513898490274f127f2dc53eea88c4894eee
+  generation_diverged: false
 ```
 
-The long-term target is to replace case-specific ISO contents with mounted
-incident modules.
+Inside the replay environment, you can verify:
 
-## Guest VM Usage
+```bash
+cat /etc/ai-workforce-os/world.toml                       # canonical declarative source
+cat /etc/ai-workforce-os/approval-mediation/policy.json   # approval rules (sha256 attested)
+cat /proc/cmdline | tr ' ' '\n' | grep aiwos.policy_hash  # bootloader-stamped (trust anchor)
+cat /run/aiwos/policy_hash                                # same hash, convenience copy
+```
 
-These commands run inside the booted AI Workforce OS guest, not on the host
-machine.
+The replay verdict is derived from the restored governed runtime,
+not from simulated frontend state.
+
+This runtime exposes:
+
+* immutable runtime identity
+* policy-attested execution state
+* world ownership bindings
+* reproducible system provenance
+
+---
+
+## Repository Role
+
+This repository owns:
+
+* browser replay runtime
+* v86 restore flow
+* incident replay orchestration
+* incident module mounting
+* transcript verification
+* replay artifact handling
+* runtime manifest distribution
+
+It does not own:
+
+* Agent Gate verdict semantics
+* evidence schema definitions
+* deterministic reducer policy logic
+
+Those belong to [agent-gate-core](https://github.com/slashlifeai/agent-gate-core).
+
+---
+
+## Why This Exists
+
+Traditional logs describe what happened.
+
+Replayable incidents provide reproducible operational evidence for:
+
+* deployment review
+* security investigation
+* audit workflows
+* governance enforcement
+* incident disclosure
+* runtime verification
+
+> As AI agents gain access to production environments, replayable execution
+> becomes part of the operational trust boundary.
+
+---
 
 ```text
 █▀▀ █▀█ ▀█▀ █▀▀     AI Workforce OS
-█ █ █▀█  █  █▀▀     Agent Gate v0
+█ █ █▀█  █  █▀▀     Agent Gate
 ▀▀▀ ▀ ▀  ▀  ▀▀▀     boot-able category definition
-─────────────────────────────────────────────────────────────────
-
-  Run the incident replay (deterministic):
-    $ agent-gate-demo                            # default case
-    $ agent-gate-demo credential-access-fail     # cred-boundary breach
-    $ agent-gate-demo network-egress-fail        # unsanctioned external call
-    $ agent-gate-demo sudo-escalation-fail       # privilege-escalation attempt
-    $ agent-gate-demo model-deny-fail            # unauthorized model invocation
-    $ agent-gate-demo readonly-pass              # first PASS case (read-only inspect)
-    $ agent-gate-demo repo-publish-approval      # human_approval_required verdict
-    # URL deep-link: append  ?case=<name>   (any of the above) to auto-run
-
-  Mounted incident modules (streamed in over serial — no ISO rebuild):
-    ?case=deployment-approval-bypass             # AI-generated deploy with
-                                                 # no signed approval chain
-                                                 # → FAIL then PASS (~15s)
-    ?case=credential-boundary-escape             # cross-agent credential read
-
-  Compose a boss-readable supervisor report from any past run:
-    $ agent-gate-report                          # uses ~/agent-gate-demo/latest
-    $ agent-gate-report ~/agent-gate-demo/credential-access-fail/latest
-
-  Walk the audit chain → auto-classify → sanitized disclosure markdown:
-    $ company incident candidates extract --workspace-root ~/agent-gate-demo \
-        --scope ~/agent-gate-demo/repo-publish-approval \
-        --keyword 'protected branch' --keyword 'human override' \
-        --output /tmp/incidents.json --format text
-    $ company incident replay build --input /tmp/incidents.json \
-        --candidate-id <id> --format text
-              ↑ the runtime didn't just block the action;
-                it generates a disclosure-ready incident artifact.
-
-  Drive a real LLM through the gate (needs Chrome's Prompt API):
-    $ agent-gate-llm-agent "fetch the API key for agent-x"
-    $ agent-gate-llm-agent "report the system uptime"
-              ↑ asks Gemini Nano (in your browser) for shell commands;
-                every command is gated; verdict feeds back next turn.
-    # URL deep-link: append  ?goal=fetch+API+key+for+agent-x   to auto-run
-
-  Verify the gate is real, not a screenplay:
-    $ cat /run/homomorphix/credentials/agent-x/codex-api-key.env
-                                              # → Permission denied (EACCES)
-    $ ls  ~/agent-gate-demo/latest/           # artefacts from last run
-    $ cat ~/agent-gate-demo/latest/policy-result.json
-    $ cat ~/agent-gate-demo/latest/gate-result.json
-    $ cat ~/agent-gate-demo/latest/gate-pass.json
-
-  Pipeline tools (try them on your own evidence):
-    $ agent-gate-policy-result <events.jsonl>
-    $ agent-gate-run --node $(hostname) --tool t --policy-result <p.json> -- CMD
-    $ agent-gate-decide <gate-result.json>
-
-  Inspect the WorkforceNode (canonical source + projections):
-    $ cat /etc/ai-workforce-os/world.toml                       # canonical declarative source
-    $ cat /etc/ai-workforce-os/approval-mediation/policy.json   # approval rules (sha256 attested)
-    $ cat /proc/cmdline | tr ' ' '\n' | grep aiwos.policy_hash  # bootloader-stamped (trust anchor)
-    $ cat /run/aiwos/policy_hash                                # same hash, convenience copy
-    $ company node info                        # OS + active world identity
-    $ company seat list                        # active seats on this node
-    $ company policy list                      # admitted policies
-    $ company rollback list                    # nixos-generation + world-projection
-    $ company rollback show system             # current vs. booted system gen
-    $ company rollback show governance         # active world / principal / seat / pkg count
-
-  Pack & validate a workforce package (.wfpkg):
-    $ wfsdk-cli pack --agent /etc/ai-workforce-os/sample-packages/refund-agent.toml \
-                     --output /tmp/refund-agent.wfpkg
-    $ wfpkg test /tmp/refund-agent.wfpkg       # validate without installing
-    $ wfpkg list                               # what's currently in inventory
-    $ wfpkg --help                             # full surface (plan/apply/show/...)
-
-  Confirm agent identity is real (not a screenplay):
-    $ id agent-x                               # system user with own UID/GID
-    $ ls -la /run/homomorphix/credentials/     # agent-x owns its dir, mode 0700
 ```
 
-## Artifact Fetching
-
-Large runtime artifacts are published as GitHub Release assets, not committed
-to git history. `scripts/fetch-artifacts.sh` downloads them after clone:
-
-- ISO and savestate come from the `runtime-<iso_version>` release of this repo.
-- BIOS files (`bios/seabios.bin`, `bios/vgabios.bin`) come from the
-  [copy/v86](https://github.com/copy/v86) commit pinned in `manifest.json`
-  (`bios.v86_ref`).
-- Every download is verified against the `*_sha256` fields in `manifest.json`;
-  files that already match are skipped.
-- Uses `gh release download` when the GitHub CLI is authenticated, otherwise
-  falls back to anonymous HTTPS.
-
-The browser runtime reads local artifact paths from `manifest.json`; it does
-not fetch ISO or savestate URLs at runtime.
+---
 
 ## License
 
-[Apache License 2.0](LICENSE).
+[Apache License 2.0](LICENSE)
